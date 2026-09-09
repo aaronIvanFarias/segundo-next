@@ -1,0 +1,41 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id        String    @id @default(uuid())
+  name      String?
+  email     String    @unique
+  password  String
+  bookings  Booking[]
+  createdAt DateTime  @default(now())
+}
+
+model Property {
+  id        String    @id @default(uuid())
+  title     String
+  type      String    @default("Alojamiento")
+  location  String
+  price     Float
+  rating    Float     @default(4.8)
+  bedrooms  Int       @default(1)
+  guests    Int       @default(2)
+  details   String    @default("")
+  imageUrl  String    @default("")
+  bookings  Booking[]
+  createdAt DateTime  @default(now())
+}
+
+model Booking {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+}
