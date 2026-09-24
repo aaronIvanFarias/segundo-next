@@ -20,6 +20,7 @@ interface Alojamiento {
 export default function Home() {
   const [alojamientos, setAlojamientos] = useState<Alojamiento[]>([]);
   const [busqueda, setBusqueda] = useState("");
+  const [filtroTipo, setFiltroTipo] = useState<string>("Todos");
   const [mostrarTrailer, setMostrarTrailer] = useState(false);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -91,31 +92,40 @@ export default function Home() {
     setPestanaActiva("alojamientos");
   };
 
-  // Función para reservar un alojamiento
-  const handleReservar = (alojamiento: Alojamiento) => {
+  // Función para procesar el pago y reserva con Stripe Checkout
+  const handlePagarConStripe = async (alojamiento: Alojamiento) => {
     if (!usuario) {
       setMensajeNotificacion("Debes iniciar sesión para realizar una reserva.");
       setTimeout(() => setMensajeNotificacion(null), 3000);
       return;
     }
 
-    const yaEstaReservado = reservas.some((item) => item.id === alojamiento.id);
+    try {
+      setMensajeNotificacion("Redirigiendo a la pasarela de pago...");
 
-    if (yaEstaReservado) {
-      setMensajeNotificacion("¡Ya has reservado este alojamiento previamente!");
+      const response = await fetch("/api/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ alojamiento }),
+      });
+
+      const data = await response.json();
+
+      if (data.url) {
+        // Redirigir directamente al Checkout de Stripe
+        window.location.href = data.url;
+      } else {
+        setMensajeNotificacion("Error al generar la sesión de pago.");
+        setTimeout(() => setMensajeNotificacion(null), 3000);
+      }
+    } catch (err) {
+      console.error("Error conectando con Stripe:", err);
+      setMensajeNotificacion("Ocurrió un error al conectar con Stripe.");
       setTimeout(() => setMensajeNotificacion(null), 3000);
-      return;
     }
-
-    const nuevasReservas = [...reservas, alojamiento];
-    setReservas(nuevasReservas);
-    localStorage.setItem(`reservas_${usuario.email}`, JSON.stringify(nuevasReservas));
-
-    setMensajeNotificacion(`¡Reserva confirmada para ${alojamiento.titulo}!`);
-    setTimeout(() => setMensajeNotificacion(null), 3500);
   };
 
-  // Función para cancelar una reserva
+  // Función para cancelar una reserva local
   const handleCancelarReserva = (alojamientoId: string | number) => {
     if (!usuario) return;
 
@@ -130,11 +140,29 @@ export default function Home() {
   // Filtrado según la pestaña activa (Alojamientos vs Reservados)
   const listaAVisualizar = pestanaActiva === "reservados" ? reservas : alojamientos;
 
+  // Obtener categorías únicas dinámicamente según los datos disponibles
+  const categoriasTipos = [
+    "Todos",
+    ...Array.from(
+      new Set(
+        listaAVisualizar
+          .map((item) => item.tipo)
+          .filter((tipo): tipo is string => Boolean(tipo))
+      )
+    ),
+  ];
+
+  // Filtrado combinado por texto de búsqueda y por tipo/categoría
   const filtrados = listaAVisualizar.filter((item) => {
-    return (
+    const coincideBusqueda =
       item.titulo?.toLowerCase().includes(busqueda.toLowerCase()) ||
-      item.ubicacion?.toLowerCase().includes(busqueda.toLowerCase())
-    );
+      item.ubicacion?.toLowerCase().includes(busqueda.toLowerCase());
+
+    const coincideTipo =
+      filtroTipo === "Todos" ||
+      item.tipo?.toLowerCase() === filtroTipo.toLowerCase();
+
+    return coincideBusqueda && coincideTipo;
   });
 
   return (
@@ -284,9 +312,9 @@ export default function Home() {
             </div>
           </section>
         ) : (
-          /* Galería de Tarjetas */
+          /* Galería de Tarjetas con Filtro por Categoría */
           <section className="space-y-6">
-            <div className="flex justify-between items-end">
+            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
               <div>
                 <h2 className="text-2xl font-extrabold text-slate-900">
                   {pestanaActiva === "reservados"
@@ -298,6 +326,26 @@ export default function Home() {
                     ? "Cargando..."
                     : `Mostrando ${filtrados.length} resultados`}
                 </p>
+              </div>
+
+              {/* Botones de filtro por tipo/categoría */}
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 max-w-full no-scrollbar">
+                {categoriasTipos.map((tipo) => {
+                  const estaActivo = filtroTipo.toLowerCase() === tipo.toLowerCase();
+                  return (
+                    <button
+                      key={tipo}
+                      onClick={() => setFiltroTipo(tipo)}
+                      className={`text-xs font-semibold px-3.5 py-1.5 rounded-xl transition-all whitespace-nowrap border ${
+                        estaActivo
+                          ? "bg-slate-900 text-white border-slate-900 shadow-sm"
+                          : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100 hover:text-slate-900"
+                      }`}
+                    >
+                      {tipo}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
@@ -311,11 +359,15 @@ export default function Home() {
               <div className="bg-white border border-slate-200/80 rounded-2xl p-8 text-center space-y-3">
                 <p className="text-slate-500 text-sm font-medium">
                   {usuario
-                    ? "Aún no tienes reservaciones registradas."
+                    ? "Aún no tienes reservaciones registradas con los filtros seleccionados."
                     : "Inicia sesión para ver tus reservaciones."}
                 </p>
                 <button
-                  onClick={() => setPestanaActiva("alojamientos")}
+                  onClick={() => {
+                    setPestanaActiva("alojamientos");
+                    setFiltroTipo("Todos");
+                    setBusqueda("");
+                  }}
                   className="text-xs font-bold text-slate-900 underline hover:text-black"
                 >
                   Explorar alojamientos disponibles
@@ -493,7 +545,7 @@ export default function Home() {
         </section>
       </main>
 
-      {/* Modal de Detalles y Reserva */}
+      {/* Modal de Detalles y Reserva con Stripe */}
       {alojamientoSeleccionado && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200"
@@ -622,10 +674,10 @@ export default function Home() {
                   </button>
                 ) : (
                   <button
-                    onClick={() => handleReservar(alojamientoSeleccionado)}
+                    onClick={() => handlePagarConStripe(alojamientoSeleccionado)}
                     className="bg-slate-900 hover:bg-black text-white text-xs font-semibold px-5 py-2.5 rounded-xl transition-all shadow-md shadow-slate-900/20"
                   >
-                    Reservar ahora
+                    Reservar y Pagar
                   </button>
                 )}
               </div>
